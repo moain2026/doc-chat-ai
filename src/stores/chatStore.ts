@@ -1,7 +1,12 @@
+/**
+ * chatStore.ts
+ * Chat/conversation state. Delegates AI responses and streaming to mockApi/streamHandler.
+ */
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Conversation, Message, Source } from "@/types";
-import { useDocumentStore } from "./documentStore";
+import type { Conversation, Message } from "@/types";
+import { getMockResponse, getMockSources, delay } from "@/services/mockApi";
+import { streamText } from "@/services/streamHandler";
 
 interface ChatStore {
   conversations: Conversation[];
@@ -13,44 +18,6 @@ interface ChatStore {
   setActiveConversation: (id: string) => void;
   getActiveConversation: () => Conversation | null;
 }
-
-const MOCK_RESPONSES: Record<string, string> = {
-  policy:
-    "Based on the **Company HR Policy 2025** document, here are the key policy highlights:\n\n1. **Working Hours**: Standard working hours are 8 AM to 5 PM, Sunday through Thursday.\n2. **Remote Work**: Employees may work remotely up to 2 days per week with manager approval.\n3. **Code of Conduct**: All employees are expected to maintain professional behavior and integrity at all times.\n\nFor the complete policy details, please refer to Section 3 of the HR Policy document.",
-  leave:
-    "According to the **Employee Handbook**, the leave policy is as follows:\n\n- **Annual Leave**: 21 working days per year (after 1 year of service)\n- **Sick Leave**: Up to 30 days with medical certificate\n- **Emergency Leave**: 3 days per incident\n- **Maternity Leave**: 90 days fully paid\n\n> **Note**: Leave requests must be submitted at least 3 days in advance through the HR portal.",
-  salary:
-    "Based on the **Salary Scale Q1 2025** document:\n\n| Grade | Salary Range |\n|-------|-------------|\n| Junior | SAR 8,000 – 12,000 |\n| Mid-level | SAR 13,000 – 18,000 |\n| Senior | SAR 19,000 – 28,000 |\n| Manager | SAR 29,000 – 45,000 |\n\nAnnual increments are based on performance reviews conducted in Q4 each year.",
-  default:
-    "Based on your uploaded documents, I found the following relevant information:\n\n**Key Points:**\n- Your documents contain comprehensive information about company policies and procedures\n- The HR handbook covers most common employee questions\n- For specific details, you can ask me about leave, salary, policies, or any other topic\n\n**Tip:** Try asking specific questions like:\n- \"What is the annual leave policy?\"\n- \"How is salary determined?\"\n- \"What are the remote work rules?\"",
-};
-
-const getMockResponse = (content: string): string => {
-  const lower = content.toLowerCase();
-  if (lower.includes("policy") || lower.includes("سياسة") || lower.includes("rule"))
-    return MOCK_RESPONSES.policy;
-  if (lower.includes("leave") || lower.includes("إجازة") || lower.includes("vacation"))
-    return MOCK_RESPONSES.leave;
-  if (lower.includes("salary") || lower.includes("راتب") || lower.includes("pay") || lower.includes("compensation"))
-    return MOCK_RESPONSES.salary;
-  return MOCK_RESPONSES.default;
-};
-
-const getMockSources = (): Source[] => {
-  const docs = useDocumentStore.getState().documents.filter((d) => d.status === "ready");
-  if (docs.length === 0) return [];
-  const snippets = [
-    "...employees are entitled to the following benefits as outlined in section 4.2...",
-    "...all requests must be submitted in writing no later than 3 business days prior...",
-    "...the performance review cycle begins in October of each fiscal year...",
-  ];
-  return docs.slice(0, Math.min(3, docs.length)).map((doc, i) => ({
-    documentId: doc.id,
-    documentName: doc.name,
-    snippet: snippets[i] ?? snippets[0],
-    relevance: parseFloat((0.95 - i * 0.12).toFixed(2)),
-  }));
-};
 
 const INITIAL_CONVERSATIONS: Conversation[] = [
   {
@@ -68,12 +35,13 @@ const INITIAL_CONVERSATIONS: Conversation[] = [
       {
         id: "msg-2",
         role: "assistant",
-        content: MOCK_RESPONSES.policy,
+        content:
+          "Based on the **Company HR Policy 2025** document:\n\n- **Remote Work**: Employees may work remotely up to **2 days per week** with manager approval.\n- Requests must be submitted via the HR portal at least 3 days in advance.\n- Remote work is not permitted during probationary periods.",
         sources: [
           {
             documentId: "doc-1",
             documentName: "Company HR Policy 2025.pdf",
-            snippet: "...remote work up to 2 days per week with manager approval...",
+            snippet: "…remote work arrangements require written approval from the direct line manager…",
             relevance: 0.97,
           },
         ],
@@ -106,16 +74,14 @@ export const useChatStore = create<ChatStore>()(
         return id;
       },
 
-      setActiveConversation: (id: string) => {
-        set({ activeConversationId: id });
-      },
+      setActiveConversation: (id) => set({ activeConversationId: id }),
 
       getActiveConversation: () => {
         const { conversations, activeConversationId } = get();
         return conversations.find((c) => c.id === activeConversationId) ?? null;
       },
 
-      deleteConversation: (id: string) => {
+      deleteConversation: (id) => {
         set((state) => {
           const remaining = state.conversations.filter((c) => c.id !== id);
           return {
@@ -128,7 +94,7 @@ export const useChatStore = create<ChatStore>()(
         });
       },
 
-      sendMessage: async (content: string) => {
+      sendMessage: async (content) => {
         const { activeConversationId, conversations } = get();
         if (!activeConversationId) return;
 
@@ -156,7 +122,8 @@ export const useChatStore = create<ChatStore>()(
           ),
         }));
 
-        await new Promise((r) => setTimeout(r, 600));
+        // Simulated "thinking" delay
+        await delay(600);
 
         const assistantId = `msg-${Date.now()}-ai`;
         const assistantMsg: Message = {
@@ -175,44 +142,45 @@ export const useChatStore = create<ChatStore>()(
           ),
         }));
 
+        // Stream response via streamHandler service
         const fullResponse = getMockResponse(content);
-        let streamed = "";
 
-        for (let i = 0; i < fullResponse.length; i++) {
-          await new Promise((r) => setTimeout(r, 18));
-          streamed += fullResponse[i];
-          const snap = streamed;
-          set((state) => ({
-            conversations: state.conversations.map((c) =>
-              c.id === activeConversationId
-                ? {
-                    ...c,
-                    messages: c.messages.map((m) =>
-                      m.id === assistantId ? { ...m, content: snap } : m
-                    ),
-                  }
-                : c
-            ),
-          }));
-        }
-
-        const sources = getMockSources();
-        set((state) => ({
-          isGenerating: false,
-          conversations: state.conversations.map((c) =>
-            c.id === activeConversationId
-              ? {
-                  ...c,
-                  updatedAt: new Date(),
-                  messages: c.messages.map((m) =>
-                    m.id === assistantId
-                      ? { ...m, isStreaming: false, sources }
-                      : m
-                  ),
-                }
-              : c
-          ),
-        }));
+        await streamText(fullResponse, {
+          charDelay: 18,
+          onChunk: (text) => {
+            set((state) => ({
+              conversations: state.conversations.map((c) =>
+                c.id === activeConversationId
+                  ? {
+                      ...c,
+                      messages: c.messages.map((m) =>
+                        m.id === assistantId ? { ...m, content: text } : m
+                      ),
+                    }
+                  : c
+              ),
+            }));
+          },
+          onComplete: () => {
+            const sources = getMockSources();
+            set((state) => ({
+              isGenerating: false,
+              conversations: state.conversations.map((c) =>
+                c.id === activeConversationId
+                  ? {
+                      ...c,
+                      updatedAt: new Date(),
+                      messages: c.messages.map((m) =>
+                        m.id === assistantId
+                          ? { ...m, isStreaming: false, sources }
+                          : m
+                      ),
+                    }
+                  : c
+              ),
+            }));
+          },
+        });
       },
     }),
     {

@@ -1,12 +1,9 @@
 import { useRef, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown } from "lucide-react";
-import { MessageBubble } from "./MessageBubble";
-import { TypingIndicator } from "./TypingIndicator";
-import { SuggestedQuestions } from "./SuggestedQuestions";
+import { MessageList } from "./MessageList";
 import { ChatInput } from "./ChatInput";
 import { useChatStore } from "@/stores/chatStore";
-import { Skeleton } from "@/components/ui/Skeleton";
 
 export const ChatContainer = () => {
   const { conversations, activeConversationId, isGenerating, sendMessage, createConversation } = useChatStore();
@@ -19,7 +16,9 @@ export const ChatContainer = () => {
     bottomRef.current?.scrollIntoView({ behavior: smooth ? "smooth" : "auto" });
   };
 
-  useEffect(() => { scrollToBottom(); }, [activeConv?.messages.length, isGenerating]);
+  useEffect(() => {
+    scrollToBottom();
+  }, [activeConv?.messages.length, isGenerating]);
 
   const handleScroll = () => {
     const el = scrollRef.current;
@@ -37,28 +36,22 @@ export const ChatContainer = () => {
     await sendMessage(q);
   };
 
-  const showEmpty = !activeConv || activeConv.messages.length === 0;
-
   return (
     <div className="flex flex-col h-full min-h-0">
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto py-4"
+        className="flex-1 overflow-y-auto py-2"
       >
-        {showEmpty ? (
-          <SuggestedQuestions onSelect={handleSuggest} />
-        ) : (
-          <div className="max-w-3xl mx-auto">
-            {activeConv.messages.map((msg, i) => (
-              <MessageBubble key={msg.id} message={msg} delay={i === activeConv.messages.length - 1 ? 0 : 0} />
-            ))}
-            <TypingIndicator show={isGenerating && !activeConv.messages.at(-1)?.isStreaming} />
-          </div>
-        )}
+        <MessageList
+          messages={activeConv?.messages ?? []}
+          isGenerating={isGenerating}
+          onSuggestedQuestion={handleSuggest}
+        />
         <div ref={bottomRef} />
       </div>
 
+      {/* Scroll-to-bottom button */}
       <AnimatePresence>
         {showScrollBtn && (
           <motion.button

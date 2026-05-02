@@ -1,6 +1,11 @@
+/**
+ * documentStore.ts
+ * Document state. Delegates upload/processing simulation to mockApi.ts.
+ */
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Document, FileType } from "@/types";
+import { mockProcessDocument } from "@/services/mockApi";
 
 interface DocumentStore {
   documents: Document[];
@@ -75,6 +80,7 @@ export const useDocumentStore = create<DocumentStore>()(
           uploadProgress: 0,
         }));
 
+        // Simulate upload progress 0→100% over 2 seconds
         for (let p = 0; p <= 100; p += 5) {
           await new Promise((r) => setTimeout(r, 100));
           set((state) => ({
@@ -92,8 +98,9 @@ export const useDocumentStore = create<DocumentStore>()(
           ),
         }));
 
-        await new Promise((r) => setTimeout(r, 3000));
-        const chunkCount = Math.floor(Math.random() * 40) + 10;
+        // Delegate processing simulation to mockApi
+        const chunkCount = await mockProcessDocument();
+
         set((state) => ({
           documents: state.documents.map((d) =>
             d.id === id ? { ...d, status: "ready", chunkCount } : d
@@ -101,13 +108,11 @@ export const useDocumentStore = create<DocumentStore>()(
         }));
       },
 
-      deleteDocument: (id: string) => {
-        set((state) => ({
-          documents: state.documents.filter((d) => d.id !== id),
-        }));
+      deleteDocument: (id) => {
+        set((state) => ({ documents: state.documents.filter((d) => d.id !== id) }));
       },
 
-      retryDocument: async (id: string) => {
+      retryDocument: async (id) => {
         const doc = get().documents.find((d) => d.id === id);
         if (!doc) return;
         set((state) => ({
@@ -115,8 +120,7 @@ export const useDocumentStore = create<DocumentStore>()(
             d.id === id ? { ...d, status: "processing", uploadProgress: 100 } : d
           ),
         }));
-        await new Promise((r) => setTimeout(r, 3000));
-        const chunkCount = Math.floor(Math.random() * 40) + 10;
+        const chunkCount = await mockProcessDocument();
         set((state) => ({
           documents: state.documents.map((d) =>
             d.id === id ? { ...d, status: "ready", chunkCount } : d
